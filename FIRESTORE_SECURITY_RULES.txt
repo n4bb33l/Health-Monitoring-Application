@@ -1,0 +1,186 @@
+/**
+ * Firestore Security Rules
+ * Child Health Monitor Application
+ * 
+ * Purpose: Enforce multi-user data isolation and access control
+ * 
+ * Rules:
+ * 1. Users can only access their own health records
+ * 2. Authentication required for all operations
+ * 3. Validate data types and required fields
+ * 4. Prevent unauthorized access
+ * 
+ * Deploy: Firebase Console → Firestore Database → Rules
+ */
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isValidHealthRecord() {
+      return request.resource.data.keys().hasAll(['heartRate', 'spo2', 'temperature', 'status', 'timestamp'])
+        && request.resource.data.heartRate is int
+        && request.resource.data.heartRate >= 0
+        && request.resource.data.heartRate <= 250
+        && request.resource.data.spo2 is int
+        && request.resource.data.spo2 >= 0
+        && request.resource.data.spo2 <= 100
+        && request.resource.data.temperature is number
+        && request.resource.data.temperature >= 30.0
+        && request.resource.data.temperature <= 45.0
+        && request.resource.data.status is string
+        && request.resource.data.status in ['GOOD', 'WARNING', 'CRITICAL']
+        && request.resource.data.timestamp is int;
+    }
+    
+    // Health records collection
+    match /users/{userId}/health_records/{recordId} {
+      // Read: User can only read their own records
+      allow read: if isOwner(userId);
+      
+      // Write: User can only write to their own records with valid data
+      allow create: if isOwner(userId) && isValidHealthRecord();
+      
+      // Update: User can update their own records
+      allow update: if isOwner(userId) && isValidHealthRecord();
+      
+      // Delete: User can delete their own records
+      allow delete: if isOwner(userId);
+    }
+    
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+/**
+ * TESTING RULES (Firebase Console → Rules Playground)
+ * 
+ * Test 1: Read own records (should ALLOW)
+ * ----------------------------------------
+ * Operation: get
+ * Path: /users/user123/health_records/record1
+ * Auth: { uid: "user123" }
+ * Expected: ALLOW
+ * 
+ * Test 2: Read other user's records (should DENY)
+ * ------------------------------------------------
+ * Operation: get
+ * Path: /users/user456/health_records/record1
+ * Auth: { uid: "user123" }
+ * Expected: DENY
+ * 
+ * Test 3: Write valid record (should ALLOW)
+ * ------------------------------------------
+ * Operation: create
+ * Path: /users/user123/health_records/record2
+ * Auth: { uid: "user123" }
+ * Data: {
+ *   "heartRate": 75,
+ *   "spo2": 98,
+ *   "temperature": 36.7,
+ *   "status": "GOOD",
+ *   "timestamp": 1710000000
+ * }
+ * Expected: ALLOW
+ * 
+ * Test 4: Write invalid record (should DENY)
+ * -------------------------------------------
+ * Operation: create
+ * Path: /users/user123/health_records/record3
+ * Auth: { uid: "user123" }
+ * Data: {
+ *   "heartRate": 300,  // Invalid: > 250
+ *   "spo2": 98,
+ *   "temperature": 36.7,
+ *   "status": "GOOD",
+ *   "timestamp": 1710000000
+ * }
+ * Expected: DENY
+ * 
+ * Test 5: Unauthenticated access (should DENY)
+ * ---------------------------------------------
+ * Operation: get
+ * Path: /users/user123/health_records/record1
+ * Auth: null
+ * Expected: DENY
+ */
+
+/**
+ * FIRESTORE INDEXES
+ * 
+ * Required for efficient queries
+ * Deploy: Firebase Console → Firestore Database → Indexes
+ * 
+ * Index 1: Time range queries
+ * ---------------------------
+ * Collection: users/{userId}/health_records
+ * Fields:
+ *   - timestamp (Ascending)
+ * Query: WHERE timestamp >= X AND timestamp <= Y ORDER BY timestamp ASC
+ * 
+ * Index 2: Critical records
+ * -------------------------
+ * Collection: users/{userId}/health_records
+ * Fields:
+ *   - status (Ascending)
+ *   - timestamp (Descending)
+ * Query: WHERE status == "CRITICAL" ORDER BY timestamp DESC
+ * 
+ * Index 3: Recent records
+ * -----------------------
+ * Collection: users/{userId}/health_records
+ * Fields:
+ *   - timestamp (Descending)
+ * Query: ORDER BY timestamp DESC LIMIT N
+ * 
+ * Note: Firestore will prompt you to create indexes when queries fail.
+ * Click the provided link to auto-generate the index.
+ */
+
+/**
+ * COST OPTIMIZATION
+ * 
+ * 1. Batch Writes
+ *    - Write every 10 seconds (not every second)
+ *    - Reduces writes by 90%
+ *    - Cost: 8,640 writes/day vs 86,400 writes/day
+ * 
+ * 2. Offline Persistence
+ *    - Enable in Android app (automatic)
+ *    - Reduces redundant reads
+ *    - Cached data doesn't count toward quota
+ * 
+ * 3. Data Retention
+ *    - Delete records older than 30 days
+ *    - Reduces storage costs
+ *    - Implement in app settings
+ * 
+ * 4. Query Optimization
+ *    - Use limits on queries
+ *    - Avoid reading entire collection
+ *    - Use real-time listeners (1 read vs multiple)
+ * 
+ * Expected Costs (Single User):
+ * - Writes: 8,640/day (FREE - under 20K limit)
+ * - Reads: ~100/day (FREE - under 50K limit)
+ * - Storage: ~1MB/month (FREE - under 1GB limit)
+ * - Total: $0/month
+ * 
+ * Expected Costs (10 Users):
+ * - Writes: 86,400/day ($0.18/day = $5.40/month)
+ * - Reads: ~1,000/day (FREE)
+ * - Storage: ~10MB/month (FREE)
+ * - Total: ~$5.40/month
+ */

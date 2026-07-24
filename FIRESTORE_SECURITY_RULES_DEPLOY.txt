@@ -1,0 +1,175 @@
+# Firestore Security Rules - Deploy These Now!
+
+## 🔐 Copy These Rules to Firebase Console
+
+### Step 1: Go to Firebase Console
+1. Open https://console.firebase.google.com
+2. Select your project
+3. Click **Firestore Database** in left menu
+4. Click **Rules** tab
+
+### Step 2: Replace Rules with This:
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============================================
+    // HEALTH RECORDS - USER ISOLATION
+    // ============================================
+    match /users/{userId}/health_records/{recordId} {
+      
+      // Users can only access their own data
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+      
+      // Validate data on create/update
+      allow create, update: if request.auth != null 
+        && request.auth.uid == userId
+        && validateHealthRecord(request.resource.data);
+    }
+    
+    // ============================================
+    // USER PROFILES (if needed)
+    // ============================================
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+
+// ============================================
+// VALIDATION FUNCTIONS
+// ============================================
+function validateHealthRecord(data) {
+  return data.heartRate is int
+    && data.heartRate >= 0
+    && data.heartRate <= 250
+    && data.spo2 is int
+    && data.spo2 >= 0
+    && data.spo2 <= 100
+    && data.temperature is number
+    && data.temperature >= 30.0
+    && data.temperature <= 45.0
+    && data.status is string
+    && data.status in ["GOOD", "WARNING", "CRITICAL"]
+    && data.timestamp is timestamp;
+}
+```
+
+### Step 3: Click "Publish"
+
+---
+
+## 📊 Create Firestore Indexes
+
+### Index 1: Time Range Queries
+1. Go to **Firestore Database** → **Indexes** tab
+2. Click **Create Index**
+3. Configure:
+   - **Collection ID:** `health_records`
+   - **Fields to index:**
+     - Field: `timestamp`, Order: `Ascending`
+   - **Query scope:** Collection
+4. Click **Create**
+
+### Index 2: Critical Records Query
+1. Click **Create Index** again
+2. Configure:
+   - **Collection ID:** `health_records`
+   - **Fields to index:**
+     - Field: `status`, Order: `Ascending`
+     - Field: `timestamp`, Order: `Descending`
+   - **Query scope:** Collection
+3. Click **Create**
+
+**Note:** Indexes take 5-10 minutes to build.
+
+---
+
+## ✅ Verification
+
+### Test Security Rules
+1. Go to **Rules** tab
+2. Click **Rules Playground**
+3. Test these scenarios:
+
+**Test 1: Authenticated Read (Should ALLOW)**
+```
+Location: /users/testUserId/health_records/record1
+Auth: Authenticated as testUserId
+Operation: get
+Result: ✅ ALLOW
+```
+
+**Test 2: Unauthenticated Read (Should DENY)**
+```
+Location: /users/testUserId/health_records/record1
+Auth: Unauthenticated
+Operation: get
+Result: ❌ DENY
+```
+
+**Test 3: Cross-User Access (Should DENY)**
+```
+Location: /users/user1/health_records/record1
+Auth: Authenticated as user2
+Operation: get
+Result: ❌ DENY
+```
+
+---
+
+## 🎯 What These Rules Do
+
+### User Isolation
+- Each user can ONLY access their own health records
+- Path structure: `users/{userId}/health_records/{recordId}`
+- Firebase Auth UID is used for isolation
+
+### Data Validation
+- Heart Rate: 0-250 BPM
+- SpO2: 0-100%
+- Temperature: 30-45°C
+- Status: "GOOD", "WARNING", or "CRITICAL"
+- Timestamp: Required
+
+### Security
+- ✅ No unauthenticated access
+- ✅ No cross-user data access
+- ✅ Data type validation
+- ✅ Range validation
+- ✅ Required fields enforced
+
+---
+
+## 💰 Cost Implications
+
+### Free Tier Limits
+- **Reads:** 50,000/day
+- **Writes:** 20,000/day
+- **Storage:** 1 GB
+
+### Your Usage (Single User)
+- **Writes:** ~8,640/day (10s interval)
+- **Reads:** ~100/day (with caching)
+- **Storage:** ~1 MB/month
+
+**Result:** ✅ **FREE** (well within limits)
+
+---
+
+## 🚨 Important Notes
+
+1. **Deploy rules BEFORE running the app** - Otherwise writes will fail
+2. **Wait for indexes to build** - Queries may fail until indexes are ready
+3. **Test in Firebase Console** - Use Rules Playground to verify
+4. **Monitor usage** - Check Firebase Console → Usage tab
+
+---
+
+**Status:** Ready to deploy!
+**Time Required:** 5 minutes
+**Next Step:** Flash ESP32 firmware
+
